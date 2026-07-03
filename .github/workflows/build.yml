@@ -1,1 +1,96 @@
+name: Kernel Build (Chopin MT6891)
 
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    env:
+      KERNEL_DIR: kernel
+      ANYKERNEL_DIR: AnyKernel3
+      CLANG_DIR: clang
+      ARCH: arm64
+      SUBARCH: arm64
+      DEFCONFIG: vendor/chopin_defconfig
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            git curl wget zip unzip \
+            build-essential bc bison flex \
+            libssl-dev libelf-dev \
+            python3 clang lld llvm
+
+      # ======================
+      # Clang (Google)
+      # ======================
+      - name: Download Clang
+        run: |
+          mkdir -p $CLANG_DIR
+          cd $CLANG_DIR
+          wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master/clang-r547379.tar.gz
+          tar -xf clang-r547379.tar.gz
+          rm -f *.tar.gz
+          echo "$PWD/bin" >> $GITHUB_PATH
+
+      # ======================
+      # Kernel source
+      # ======================
+      - name: Clone Kernel Source
+        run: |
+          git clone https://github.com/dengshijiea-cmyk/Redmi-Note-10-Pro-5G-chopin-MT6891-Linux-4.14-KernelSU-GitHub-Actions $KERNEL_DIR
+
+      # ======================
+      # KernelSU
+      # ======================
+      - name: Apply KernelSU
+        run: |
+          cd $KERNEL_DIR
+          curl -LSs https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh | bash -
+
+      # ======================
+      # Build kernel
+      # ======================
+      - name: Build Kernel
+        run: |
+          cd $KERNEL_DIR
+
+          make O=out ARCH=$ARCH $DEFCONFIG
+
+          make -j$(nproc) O=out \
+            ARCH=$ARCH \
+            CC=clang \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+
+      # ======================
+      # AnyKernel3
+      # ======================
+      - name: Package AnyKernel3
+        run: |
+          git clone https://github.com/osm0sis/AnyKernel3 $ANYKERNEL_DIR
+
+          cp $KERNEL_DIR/out/arch/arm64/boot/Image* $ANYKERNEL_DIR/ || true
+          cp $KERNEL_DIR/out/arch/arm64/boot/dtbo.img $ANYKERNEL_DIR/ || true
+          cp $KERNEL_DIR/out/arch/arm64/boot/dtb* $ANYKERNEL_DIR/ || true
+
+          cd $ANYKERNEL_DIR
+          zip -r9 Kernel-Chopin-KernelSU.zip .
+
+      # ======================
+      # Upload artifact
+      # ======================
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kernel-Chopin
+          path: AnyKernel3/*.zip
